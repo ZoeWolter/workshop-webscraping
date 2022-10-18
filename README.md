@@ -1,4 +1,4 @@
-![CorrelAid X Konstanz Header](https://github.com/ZoeWolter/CorrelAidXKonstanz-WebScraping/blob/main/assets/img/header.png?raw=true)
+![CorrelAid Header](https://github.com/CorrelAid/workshop-webscraping/blob/main/assets/img/header.png?raw=true)
 
 # CorrelAidXKonstanz - Webscraping mit R
 
