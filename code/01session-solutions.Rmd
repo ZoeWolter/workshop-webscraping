@@ -165,6 +165,7 @@ data.frame(
   location = gsub('^\\|', '', events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% rvest::html_text2()),
   url = events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_attr('href')
 ) -> df # @Phil: äm ja schön ist anders, Ideen?
+  # @Zoe: haha vielleicht etwas mit tibble::tribble?
 ```
 
 Und schon haben wir die Daten! Eigentlich gar nicht so viel Code, oder?
@@ -208,6 +209,7 @@ purrr::map(.x = pages, ~ {
   #...und abspeichern!
 }) -> results   
 # @Phil: vielleicht noch einbauen, dass die auch lokal gespeichert werden?
+# @Zoe: mit polite::rip()?  
 ```
 
 ```{r}
@@ -227,6 +229,7 @@ for (i in 1:length(results)) {
 } 
 # @Phil: Da gibt's doch sicher auch eine charmantere purrr-Lösung zu? 
 # @Phil: Bei 26, 28, 29 crasht das ganze, da passen irgendwelche Längen nicht zusammen, kannst du das vielleicht mal checken?
+# @Zoe: vielleicht mit map_df, map_dfr?
 ```
 
 Der Datensatz ist zwar schon erstaunlich clean, ein bisschen Aufwand müssten wir jetzt aber eigentlich noch in die Bereinigung stecken - sparen wir uns jetzt für den Moment. Trotzdem wichtig: speichern des Datensatzes!
