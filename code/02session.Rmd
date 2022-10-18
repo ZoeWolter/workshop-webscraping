@@ -1,0 +1,654 @@
+---
+title: "02session"
+author: "Philipp Bosch & Zoé Wolter"
+date: "Dec 09, 2021"
+output: html_document
+---
+
+# Grundlegende Struktur
+
+-   Bezug auf letzte Session:
+
+    -   Liste an Namen und Ergebnissen für US Wahl
+    -   Namen bilden Ausgangspunkt für FEC-API
+
+-   Prinzip API 
+
+    -   GET/POST
+
+-   FEC-API 
+
+    -   Endpoints und example responses
+    -   Plan: Namen -\> IDs -\> Indep Expenditures
+
+-   Sending requests
+
+    -   One to understand structure
+    -   wrap in function to scale
+
+-   Clean results 
+
+    -   map
+    -   regex
+    -   fail safe
+
+-   Communicate results 
+
+# Agenda
+
+-   Rückblick auf Zwischenergebnis gestern
+-   Einführung API
+-   Die FEC-API
+-   Kommunikation mit der FEC-API
+-   Ergebnisse der FEC-API bereinigen
+-   Resultate kommunizieren
+
+Zuerst laden wir wieder die benötigten Packages
+
+```{r}
+source(knitr::purl("packages.Rmd", quiet = TRUE))
+```
+
+Hier noch einmal die Liste an Politikern die wir gestern zuletzt gezogen haben.
+
+```{r}
+base_url <- "https://en.wikipedia.org/"
+
+polite::bow(url = str_c(base_url, 
+                        "/wiki/List_of_current_members_of_the_United_States_House_of_Representatives")) %>% 
+  polite::scrape() %>% 
+  rvest::html_element(xpath = '//*[@id="votingmembers"]') %>% 
+  rvest::html_table() %>% 
+  janitor::clean_names() -> raw_house_members
+
+raw_house_members %>% 
+  dplyr::select(-party) %>% 
+  dplyr::filter(party_2 == "Republican") %>% 
+  dplyr::rename(party = party_2, age = born_3) %>% 
+  mutate(across(.cols = everything(), ~ stringr::str_squish(.x))) %>% 
+  mutate(across(.cols = everything(), ~ stringr::str_remove_all(.x, pattern = "\\[[0-9]*\\]"))) %>% 
+  mutate(birthday = lubridate::ymd(stringr::str_extract(age, "[0-9]{4}-[0-9]{2}-[0-9]{2}")),
+         assumed_office = as.integer(stringr::str_remove(assumed_office, "\\(special\\)")),
+         member = stringr::str_replace_all(member, c("é" = "e", "í" = "i", 
+                                                     "Mike" = "Michael", 
+                                                     "Jim" = "James",
+                                                     "Bob" = "Robert",
+                                                     "Tom McClintock" = "Thomas McClintock",
+                                                     "Buddy Carter" = "Earl Leroy Carter",
+                                                     "Rick W. Allen" = "Richard Allen",
+                                                     "Randy Feenstra" = "Randall Feenstra",
+                                                     "Hal Rogers" = "Harold Rogers",
+                                                     "Andy Harris" = "Andrew Harris",
+                                                     "Jack Bergman" = "John Bergman",
+                                                     "Bill Huizenga" = "William Huizenga",
+                                                     "Tom Emmer" = "Thomas Emmer",
+                                                     "Tom Reed" = "Thomas Reed",
+                                                     "Ted Budd" = "Theodore Budd",
+                                                     "Chuck Fleischmann" = "Charles Fleischmann",
+                                                     "Mark E. Green" = "Mark Green",
+                                                     "Louie Gohmert" = "Louis Gohmert",
+                                                     "Van Taylor" = "Nicholas Taylor",
+                                                     "Beth Van Duyne" = "Elizabeth van Duyne",
+                                                     "Liz Cheney" = "Elizabeth Cheney"))) -> raw_house_members
+  
+```
+
+Im Endeffekt sind wir vor allem an den Namen der Abgeordneten interessiert. Wir möchten nun nämlich zu den einzelnen Abgeordneten ihre zugehörigen Spenden finden. Das ermöglicht uns die [FEC-API](https://api.open.fec.gov/developers/). 
+
+Was sind APIs überhaupt?
+
+Eine API (*Application Programming Interface*, de: Schnittstelle zur Programmierung von Anwendungen) ist eine Schnittstelle, die ein System bereitstellt, um anderen Programmen die Interaktion zu ermöglichen.
+
+Eine Interaktion sieht so aus:
+
+1.  Der **Client** macht eine Anfrage (engl. Request) an die API
+2.  Die API verarbeitet die Anfrage und gibt eine Antwort (engl.: **Response**) zurück.
+3.  Der Client verarbeitet die Antwort.
+
+APIs verfügen zumeist über eine **Dokumentation**, die enthält, welche Funktionalitäten verfügbar sind und wie Anfragen gestellt werden müssen.
+
+**Analogie**: Wenn Ihr (als *Client*) im Restaurant seid, stellt Euch das Restaurant eine:n Kellner:in (Eure *API*) und eine Speisekarte (Eure *API-Dokumentation*) bereit. Der:die Kellner:in nimmt Eure Bestellungen (*Anfragen*) entgegen, die Küche verarbeitet diese und der:die Kellner:in bringt Eure Bestellung (*Antwort*).
+
+Die allermeisten APIs heutzutage verwenden das HTTP-Protokoll, welches fünf sogenannte *Methoden* umfasst: GET, POST, PUT, PATCH und DELETE. Da wir in unserem Fall auf Interaktionen schauen, welche sich auf den Datenaustausch fokussieren, ergeben sich folgende Entsprechungen:
+
+-   `GET` --\> Daten lesen
+-   `POST` --\> Neue Daten erstellen
+-   `PUT` --\> Daten ersetzen
+-   `PATCH` --\> Daten aktualisieren
+-   `DELETE` --\> Daten löschen
+
+### GET-Anfragen
+
+Wenn Ihr nur Daten laden möchtet, reicht `GET` meistens aus. Je nach API können allerdings auch `POST` Anfragen notwendig sein. `GET`-Anfragen können als normale URL (das was Ihr in euren Browser eingebt) abgebildet werden. Diese URLs setzen sich aus drei Teilen zusammen: `{BASIS_URL}/{ROUTE}?{QUERY_PARAMETER}`.
+
+Das kennt Ihr zum Beispiel von einer Google-Suche: `https://www.google.com/search?q=CorrelAid`.
+
+-   `BASIS_URL`: `https://www.google.com/`
+
+-   `ROUTE`: `search`
+
+-   `QUERY_PARAMETER`:
+
+    -   `q`: `CorrelAid`
+
+### Statuscodes
+
+Fast alle APIs geben in Ihrer Antwort einen Code zurück, anhand dem man schnell sehen kann, ob die Anfrage erfolgreich war oder nicht. Dieser sogenannte *Statuscode* ist sehr hilfreich, da er Aufschluss gibt, was schief gegangen sein könnte.
+
+Wenn die Anfrage erfolgreich war, gibt die API einen `200` Statuscode zurück. Darüber hinaus gibt es viele Statuscodes, die einen Fehler anzeigen. Häufige Fälle sind:
+
+-   `404`: Nicht gefunden ("Not found"). Z.B. existiert der Endpunkt / die Route gar nicht in der API
+-   `401`: Nicht autorisiert ("Not authorised"): Ihr seid nicht autorisiert auf die API zuzugreifen, z.B. weil Ihr keinen *Token* übergeben habt.
+-   `403`: Nicht erlaubt ("Forbidden"): Ihr seid zwar im Prinzip für die API autorisiert, aber nicht für die Route, auf die ihr zugreifen wollt (z.B. sensitive Daten oder Administration).
+-   `422`: Nicht verarbeitbare Anfrage ("Unprocessable Entity"): Eure Anfrage wurde nicht richtig gestellt
+-   `500`: Interner Server-Fehler ("Internal Server Error"): Eure Anfrage ist zwar richtig gestellt worden, innerhalb der API kam es aber zu einem Fehler
+
+### Beispiel anhand der FEC-API
+
+Die FEC-API stellt einen grafischen "Spielplatz" bereit. Dort können wir Anfragen ausprobieren und diese später in Code übersetzen.
+
+Apropos Code. Für die Kommunikation mit APIs benutzen wir das `httr` package. Dies erlaubt es uns die einzelnen Parameter einer Query einfach zu übergeben. Wie wir die Query aufbauen, können wir einfach Anhand der Query aus der grafischen "Spielwiese" herausfinden:
+
+`https://api.open.fec.gov/v1/names/candidates/?api_key=DEMO_KEY&q=Barry%20Moore%09&q=&q=`
+
+Wir erkennen die Basis der URL und auch den jeweiligen Endpunkt sowie den Key.
+- Base: https://api.open.fec.gov/v1
+- Endpunkt: /names/candidates/
+- ?api_key=DEMO_KEY
+
+Versuchen wir nun einmal selbst die URL zu basteln.
+```{r}
+candidate_endpoint <- "https://api.open.fec.gov/v1/candidates/search/"
+
+# die einzelnen Parameter übergeben wir als Objekte einer Liste
+# zuerst sollten wir jedoch unseren Key einlesen
+
+fec_key <- read_lines(here::here("fec_key.txt"))
+
+# nun die query Liste
+query <- list(page = 1, name = "Jerry Carl", api_key = fec_key,
+              election_year = 2020, office = "H")
+```
+
+
+Nun lassen wir die Magic von `httr` wirken!
+```{r}
+# Aufbau der URL
+fec_url <- httr::modify_url(url = candidate_endpoint, query = query)
+
+# Ziehen der Informationen
+
+jerry_carl_fec <- httr::GET(fec_url)
+```
+
+Schaut euch mal den Status Code an, sind das gute Neuigkeiten? 
+
+
+Nun wollen wir dieses Ungetüm einer Liste aber auch auswerten. Sehr oft hilft es,
+sich durch ein bisschen click & go einen Überblick zu verschaffen.
+
+```{r}
+jerry_carl_fec %>%
+  # wir greifen auf den content der response zu und geben sie als Text aus
+    httr::content(as = "text", encoding = "UTF-8") %>%
+  # nun convertieren wir von JSON zu einer R-Liste
+    jsonlite::fromJSON() %>% 
+  # wir ziehen uns nur die Informationen aus "results"
+    purrr::pluck("results") %>% 
+  # nun begrenzen wir den dataframe auf die zwei Variablen die uns Interessieren
+    dplyr::select(candidate_id, name, election_districts, state) %>% 
+    tidyr::tibble()
+```
+
+### Hands On!
+
+Versucht nun einmal selbst die Candidate ID der Kandidatin "Lauren Boebert" herauszufinden
+
+```{r}
+### key einlesen
+
+
+
+### query aufbauen
+
+
+
+
+### anhand von query die URL bauen
+
+
+
+
+### Informationen ziehen
+```
+
+Objekt von der FEC-API verarbeiten
+```{r}
+
+```
+
+Zusatzaufgabe! Findet jemand heraus, wie viele Calls wir in dieser Stunde noch
+an die API richten dürfen? Tipp: Schaut euch mal die "headers" der response an.
+```{r}
+
+```
+
+
+
+## Scaaaale it up! We gotta catch 'em all!
+
+Ihr kennt das Schema, nur für eine ID ist das ganze etwas witzlos. Also same 
+procedure as Tuesday: Wir schreiben eine Funktion und wenden diese per `map()`
+auf alle Namen in unserer Liste an.
+
+Funktion definieren
+```{r}
+fec_candidates <- function(candidate_name){
+  
+
+  base_url <- "https://api.open.fec.gov/v1/candidates/search/"
+  query <- list(page = 1, name = candidate_name, api_key = fec_key,
+                election_year = 2020, office = "H")
+  url <- httr::modify_url(url = base_url, query = query)
+  
+  httr::GET(url) -> raw_json
+     
+  
+}
+```
+
+Funktion mit map aufrufen
+```{r}
+raw_house_members %>% 
+  select(member) %>% 
+  pull() %>% 
+  map(possibly(.f = fec_candidates, otherwise = NA_real_)) -> candidate_id_json
+
+```
+
+Das kann unter Umständen ganz schön lange dauern. Deshalb wollen wir dieses wertvolle
+Objekt jetzt auch abspeichern. Sonst müssen wir das jedes mal aufs neue ziehen.
+
+```{r}
+saveRDS(candidate_id_json, file = here::here("data", "cand_id_json.RDS"))
+```
+
+## Bereinigen der Responses
+Nun wollen wir uns diese Liste mal genauer anschauen. Wir haben jetzt für jeden
+Abgeordneten ein response object bekommen. Aus dieser response müssen wir nun die 
+relevante Information ziehen. Dabei gehen wir vor wie immer. Code anwenden, der für
+den Einzelfall funktioniert und per `map()` für alles anwenden.
+
+Einzelfall:
+```{r}
+candidate_id_json[[2]] %>%
+  # wir greifen auf den content der response zu und geben sie als Text aus
+    httr::content(as = "text", encoding = "UTF-8") %>%
+  # nun convertieren wir von JSON zu einer R-Liste
+    jsonlite::fromJSON() %>% 
+  # wir ziehen uns nur die Informationen aus "results"
+    purrr::pluck("results") %>% 
+  # nun begrenzen wir den dataframe auf die Variablen die uns Interessieren
+    dplyr::select(candidate_id, name, election_districts, state) %>% 
+    tidyr::tibble()
+```
+Das schaut eigentlich ganz gut aus. Nur die Information im election_district gefällt uns noch nicht 100%.
+Dort scheint als Eintrag eine Liste an strings gespeichert zu sein. Diese konvertieren wir jetzt einfach
+zu einem normalen string. Der jeweils letzte Eintrag in der Liste ist die aktuellste Wahl.
+```{r}
+candidate_id_json[[2]] %>%
+  # wir greifen auf den content der response zu und geben sie als Text aus
+    httr::content(as = "text", encoding = "UTF-8") %>%
+  # nun convertieren wir von JSON zu einer R-Liste
+    jsonlite::fromJSON() %>% 
+  # wir ziehen uns nur die Informationen aus "results"
+    purrr::pluck("results") %>% 
+  # nun begrenzen wir den dataframe auf die Variablen die uns Interessieren
+    dplyr::select(candidate_id, name, election_districts, state) %>% 
+  # liste zu string convertieren
+    dplyr::mutate(election_districts = toString(election_districts)) %>% 
+  # Nummer extrahieren
+    dplyr::mutate(election_districts = stringi::stri_extract_last_regex(str = election_districts, pattern = "[[:digit:]]+")) %>%
+    tidyr::tibble()
+```
+
+
+Funktion für komplette Liste:
+
+```{r}
+extract_id <- function(list_element){
+  list_element %>% 
+    httr::content(as = "text", encoding = "UTF-8") %>%
+  # nun convertieren wir von JSON zu einer R-Liste
+    jsonlite::fromJSON() %>% 
+  # wir ziehen uns nur die Informationen aus "results"
+    purrr::pluck("results") %>% 
+  # nun begrenzen wir den dataframe auf die Variablen die uns Interessieren
+    dplyr::select(candidate_id, name, election_districts, state) %>% 
+  # liste zu string convertieren
+    dplyr::mutate(election_districts = toString(election_districts)) %>% 
+  # Nummer extrahieren
+    dplyr::mutate(election_districts = stringi::stri_extract_last_regex(str = election_districts, pattern = "[[:digit:]]+")) %>%
+    tidyr::tibble()
+}
+```
+
+Funktion per `map()` für die komplette Liste anwenden. Als output hätten wir gerne
+wieder eine Liste und nicht 213 verschiedene Datensätze.
+
+```{r}
+candidate_id_json %>% 
+  map(possibly(.f = extract_id, otherwise = NA)) -> candidate_id_df
+```
+
+
+Ein Blick in die Daten verrät uns nun, dass die API hin und wieder seltsame Ergebnisse geliefert hat.
+Entweder keine Information oder direkt doppelte Informationen. Normalerweise würden wir dem jetzt
+nachgehen und die Informationen nachträglich per Hand eintragen. Hier werfen wir diese Beobachtungen einfach weg.
+
+```{r}
+which(is.na(candidate_id_df))
+
+candidate_id_df[!is.na(candidate_id_df)] -> cleaned_candidates_list
+```
+
+```{r}
+cleaned_candidates_list[-c(24, 51, 108)] -> cleaned_candidates_list
+```
+
+```{r}
+for (i in seq_along(cleaned_candidates_list)) {
+  if (nrow(cleaned_candidates_list[[i]]) > 1){
+    stop()
+  }
+  else {
+    print(nrow(cleaned_candidates_list[[i]]))
+  }
+}
+```
+
+Awesome. Jetzt haben wir jeweils die ID der einzelnen KandidatInnen. Let's talk money!
+Dazu müssen wir erst einmal den richtigen Endpunkt bei der FEC-API finden.
+
+## Independent Expenditures ziehen
+Wieder gehen wir nach dem selben Prinzip vor. Wir ziehen die Informationen für eine
+ID und bauen danach eine Funktion für alle IDs.
+
+Zuerst wollen wir aber mehr Übersicht. Dazu lösen wir die Liste an data frames auf und
+bauen einen "großen" Datensatz. Dazu "pappen" wir die Datensätze einfach aneinander.
+
+```{r}
+bind_rows(cleaned_candidates_list) -> candidate_id_df
+```
+
+### Einzelfall
+
+```{r}
+# Endpunkt der API bestimmen (URL)
+indep_expend_endpoint <- "https://api.open.fec.gov/v1/schedules/schedule_e/by_candidate/"
+
+
+# die einzelnen Parameter übergeben wir als Objekte einer Liste
+query_indep_exp <- list(cycle = 2020, api_key = fec_key,
+                election_full = "true", page = 1, per_page = 100,
+                candidate_id = "H8AZ08158")
+```
+
+
+Nun lassen wir die Magic von `httr` wirken!
+```{r}
+# Aufbau der URL
+fec_inde_exp_url <- httr::modify_url(url = indep_expend_endpoint, query = query_indep_exp)
+
+# Ziehen der Informationen
+
+debbie_lesko_indep_exp <- httr::GET(fec_inde_exp_url)
+```
+
+Nun haben wir wieder ein response Objekt. Dieses müssen wir wie bei den IDs für 
+R "lesbar" machen und in eine vernünftige Struktur bringen.
+
+```{r}
+# Daten für R lesbar machen und zu Data frame umwandeln
+debbie_lesko_indep_exp %>%
+    httr::content(as = "text", encoding = "UTF-8") %>%
+    jsonlite::fromJSON() %>% 
+    purrr::pluck("results")
+```
+
+
+NRA doing NRA-things...
+
+
+## Hands on! 
+
+Versucht nun für den Abgeordneten "MATT GAETZ" die independent expenditures zu ziehen.
+
+```{r}
+# Endpunkt der API bestimmen (URL)
+
+
+# die einzelnen Parameter übergeben wir als Objekte einer Liste
+
+
+
+
+```
+
+```{r}
+# Aufbau der URL
+
+
+# Ziehen der Informationen
+
+```
+
+```{r}
+# Daten für R lesbar machen und zu Data frame umwandeln
+
+```
+
+
+
+### Scaaaaaale it up!
+
+Nun wollen wir die Logik analog zu oben für alle IDs anwenden. Also erst herunterladen und 
+in einem nächsten Schritt bereinigen.
+
+Funktion für den download
+
+```{r}
+fec_expenditures <- function(candidate){
+  
+  
+  indep_expend_endpoint <- "https://api.open.fec.gov/v1/schedules/schedule_e/by_candidate/"
+  
+  query_indep_exp <- list(cycle = 2020, api_key = fec_key,
+                election_full = "true", page = 1, per_page = 100,
+                candidate_id = candidate)
+
+
+  url <- httr::modify_url(url = indep_expend_endpoint, query = query_indep_exp)
+  
+  raw_json <- httr::GET(url) 
+  
+  pages <- jsonlite::fromJSON(content(raw_json, "text", encoding = "UTF-8"))$pagination$pages
+  
+  
+  if(pages > 1){
+      stop("build pagination")
+  }
+  
+  else{
+    return(raw_json)
+  }
+}
+```
+
+
+
+Die Funktion für eine ID aufrufen
+```{r}
+fec_expenditures("H6IL18088") %>% 
+    httr::content(as = "text", encoding = "UTF-8") %>%
+    jsonlite::fromJSON() %>% 
+    purrr::pluck("results")
+```
+
+Die Funktion mit map für alle IDs aufrufen!
+```{r}
+candidate_id_df %>% 
+  select(candidate_id) %>% 
+  pull() %>% 
+  map(possibly(.f = fec_expenditures, otherwise = NA_real_)) -> indep_expenditures_list
+```
+
+Better save than sorry, wir speichern die Liste!
+```{r}
+saveRDS(indep_expenditures_list, file = here::here("data", "indep_expenditures_list.RDS"))
+```
+
+
+Nun bereinigen wir alle Datensätze dieser Liste nach dem Prinzip, welches wir oben
+angewandt haben.
+
+```{r}
+map(.x = indep_expenditures_list, ~ {
+  .x %>% 
+    httr::content(as = "text", encoding = "UTF-8") %>% 
+    jsonlite::fromJSON() %>% 
+    purrr::pluck("results")
+}) -> indep_expenditures_df
+```
+
+Bei einem Blick auf die Liste fällt uns auf, dass manche Elemente leer sind.
+Diese PolitikerInnen haben keine Independent Expenditures erhalten im Beobachtungszeitraum.
+
+```{r}
+bind_rows(indep_expenditures_df) -> indep_expenditures_df
+```
+
+
+## Erste Analysen
+
+Nun schauen wir uns mal an, ob wir etwas Interessantes in den Spendendaten finden.
+Ich habe zum Beispiel mal ein Termpaper geschrieben mit dem Titel: "Who ordered sedition?"
+Also gibt es zwischen Trumpists und "gemäßigten" Republikaner Unterschiede hinsichtlich 
+ihrer Spender?
+
+Dazu habe ich euch einen Datensatz vorbereitet, welcher eine Variable zu Abstimmungsverhalten beeinhaltet.
+Genauer gesagt, ob die Politiker die Stimmenauszählung der US-Präsidentschaftswahl akzeptiert haben oder 
+dagegen gestimmt haben.
+
+```{r}
+# einlesen von Daten
+Rep_Objectors <- read_delim(file = here::here("data", "Rep_Objectors.csv"), 
+    delim = ";", escape_double = FALSE, trim_ws = TRUE) %>% 
+  janitor::clean_names()
+```
+Wir können diesen Datensatz anhand der Wahlbezirks ID an unsere gesammelten Daten
+mergen. 
+
+```{r}
+indep_expenditures_df %>% 
+  left_join(candidate_id_df, by = c("candidate_id" = "candidate_id")) %>% 
+  unite(district_id, state, election_districts, sep = "") %>% 
+  left_join(Rep_Objectors, by = c("district_id" = "district_id")) -> final_df
+
+```
+
+Nun bauen wir uns noch einen Indikator ob die Person "objected" hat oder nicht
+
+```{r}
+final_df %>% 
+  dplyr::mutate(objection = case_when(
+    is.na(firstlastp) == TRUE ~ 0,
+    !is.na(firstlastp) == TRUE ~ 1,
+  )) -> final_df
+```
+
+### Erste Ergebnisse
+
+Schauen wir uns doch mal an, ob "Objector" mehr oder weniger Independent Expenditures erhalten.
+
+```{r}
+final_df %>% 
+  filter(support_oppose_indicator == "S") %>% 
+  group_by(objection) %>% 
+  summarise(indep_expend = mean(total))
+```
+Wir könnten uns auch anschauen welche PACs (Variable: committee_name) besonders gerne an Objector spenden.
+
+```{r}
+final_df %>% 
+  filter(objection == 1 & support_oppose_indicator == "S") %>% 
+  count(committee_name) %>% 
+  filter(n > 1) %>% 
+  arrange(desc(n))
+
+final_df %>% 
+  filter(objection == 0 & support_oppose_indicator == "S") %>% 
+  count(committee_name) %>% 
+  filter(n > 1) %>% 
+  arrange(desc(n))
+```
+
+### Hands On!
+
+Findet den/die Kandidat/in mit den höchsten Einnahmen
+```{r}
+
+```
+
+Findet den PAC (Variable: committee_name) mit den höchsten Ausgaben. Einmal für Objector und einmal für non-objector.
+```{r}
+
+```
+
+
+
+## Ausblick POST-Anfragen
+
+APIs sind ziemlich mächtig, das dürfte nun allen klar sein. Jedoch haben wir 
+bisher nur GET-Requests benutzt. Ziemlich nützlich sind aber auch Post-requests.
+Zum Beispiel für classification problems.
+
+So könnten wir beispielsweise anhand von Bildern das Alter oder Geschlecht von
+Kandidaten bestimmen lassen. Andere Merkmale sind auch möglich, aber sehr kritisch gesehen
+in der Forschung.
+
+Code um Bild-URLs von Wikipedia zu ziehen
+```{r}
+url_pictures <- "https://en.wikipedia.org/wiki/List_of_current_members_of_the_United_States_House_of_Representatives"
+
+
+session_pictures <- polite::bow(url = url_pictures, user_agent = "Web Data with R - philipp.bosch@uni-konstanz.de")
+
+session_pictures %>% 
+  polite::scrape() -> pictures_html
+
+
+# work with html
+pictures_html %>%
+  rvest::html_elements("#votingmembers") %>% 
+  rvest::html_nodes("img") %>% 
+  rvest::html_attr("src") %>% tibble() -> image_links
+
+
+
+pictures_html %>%
+  rvest::html_elements("#votingmembers") %>% 
+  rvest::html_table() %>% 
+  purrr::pluck(1) %>%
+  dplyr::select(-3) %>% 
+  dplyr::filter(Member != "VACANT") %>%
+  dplyr::select(Party, District, Member) -> aux_info_pictures
+  
+
+bind_cols(aux_info_pictures, image_links) %>% 
+  dplyr::rename("url" = 4) %>% 
+  dplyr::mutate(url = str_c("https:", url),
+         url = str_replace_all(url, "\\d{2}(?=px)", "600")) %>% 
+  dplyr::filter(Party == "Republican") -> pictures_df
+```
+
