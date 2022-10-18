@@ -111,6 +111,7 @@ events_html %>%
   rvest::html_element(xpath = '//ul/li[1]/div/div[2]/h3/a') %>% 
   rvest::html_text()
 ```
+
 Das geht auch für eine der anderen Veranstaltungen! Wo ist der Unterschied im XPath?
 ```{r}
 events_html %>%
@@ -154,8 +155,10 @@ events_html %>%
 
 
 ## Datenbereinigung
+
 Inzwischen haben wir zwar die Teile der html-Seite, die uns interessieren - aber noch nicht in einer brauchbaren Form für weitere Analysen. Daher once again: Datenbereinigung!
 Wir ziehen uns alle extrahierten Daten zusammen in einen Datensatz und erledigen dabei direkt die hier überschaubare Bereinigung:
+
 ```{r}
 data.frame(
   event = events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_text2(),
@@ -164,8 +167,7 @@ data.frame(
   end = events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[2]') %>% rvest::html_text2(),
   location = gsub('^\\|', '', events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% rvest::html_text2()),
   url = events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_attr('href')
-) -> df # @Phil: äm ja schön ist anders, Ideen?
-  # @Zoe: haha vielleicht etwas mit tibble::tribble?
+) -> df
 ```
 
 Und schon haben wir die Daten! Eigentlich gar nicht so viel Code, oder?
@@ -204,15 +206,37 @@ pages <- 1:33
 purrr::map(.x = pages, ~ {
   #...die URL für jedes Jahr zusammenbasteln und uns jeweils auf der Seite anmelden...
   polite::nod(session, str_c('events//liste/?tribe_event_display=past&tribe_paged=', .x)) %>% 
-    #...die HTML scrapen...
-    polite::scrape()
-  #...und abspeichern!
+  #... und die HTML scrapen!
+    polite::scrape() 
 }) -> results   
-# @Phil: vielleicht noch einbauen, dass die auch lokal gespeichert werden?
-# @Zoe: mit polite::rip()?  
+
+# Alternativ zum lokalen Abspeichern der Dateien:
+purrr::map(.x = pages, ~ {
+  #...die URL für jedes Jahr zusammenbasteln und uns jeweils auf der Seite anmelden...
+  polite::nod(session, str_c('events//liste/?tribe_event_display=past&tribe_paged=', .x)) %>% 
+  #...und abspeichern!
+    polite::rip(destfile = str_c('events_', .x, '.html'),
+                path = here::here('assets', 'htmls'),
+                overwrite = TRUE)
+})
 ```
 
+Aus den htmls der einzelnen Eventsseiten kann dann ein Datensatz erstellt werden:
+
 ```{r}
+# 1) Entweder mit der purrr-Funktion aus dem Tidyverse
+purrr::map_dfr(.x = results, ~ {
+  data.frame(
+    event = .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_text2(),
+    date = sub(' ,.*', '', .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
+    start = sub('.*, ', '', .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
+    end = .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[2]') %>% rvest::html_text2(),
+    location = gsub('^\\|', '', .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% rvest::html_text2()),
+    url = .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_attr('href')
+  ) 
+}) -> all_events
+
+# 2) Oder alternativ mit einem For Loop
 all_events <- setNames(data.frame(matrix(ncol = 6, nrow = 0)), c('event', 'date', 'start', 'end', 'location', 'url'))
 
 for (i in 1:length(results)) {
@@ -227,9 +251,6 @@ for (i in 1:length(results)) {
   ) -> tmp
   all_events <- rbind(test, tmp)
 } 
-# @Phil: Da gibt's doch sicher auch eine charmantere purrr-Lösung zu? 
-# @Phil: Bei 26, 28, 29 crasht das ganze, da passen irgendwelche Längen nicht zusammen, kannst du das vielleicht mal checken?
-# @Zoe: vielleicht mit map_df, map_dfr?
 ```
 
 Der Datensatz ist zwar schon erstaunlich clean, ein bisschen Aufwand müssten wir jetzt aber eigentlich noch in die Bereinigung stecken - sparen wir uns jetzt für den Moment. Trotzdem wichtig: speichern des Datensatzes!
