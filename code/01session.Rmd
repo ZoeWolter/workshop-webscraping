@@ -39,3 +39,372 @@ source(knitr::purl("packages.Rmd", quiet = TRUE))
 ## URL
 
 Zuerst suchen wir uns die URL, von der wir uns die Daten ziehen wollen. Diese speichern wir für die weitere Bearbeitung in einem Vektor. Dafür speichern wir entweder die Base URL (Stamm-URL), von der aus man weitere URLs zusammenbauen kann oder direkt die gesamte URL:
+
+```{r}
+base_url <- 'https://cyberlago.net/'
+events_url <- 'https://cyberlago.net/events/'
+```
+
+## Be polite
+
+Bevor wir mit dem eigentlichen Scraping beginnen, sollten wir der Website einige Informationen über uns durch den User-Agent übergeben und uns über mögliche Einschränkungen durch die Website informieren. Dafür gibt es verschiedene Möglichkeiten, sehr einfach geht es beispielsweise mit dem `polite`-Package:
+
+```{r}
+polite::bow(url = str_c(base_url), 
+            user_agent = 'Workshop Web Data Collection - zoe.w@correlaid.org') -> session
+```
+
+Hier bekommen wir zwei sehr wichtige Informationen: 
+
+- Crawl-Delay: 5 Sekunden
+- Wir dürfen scrapen!
+
+## Scraping der Website: htmls downloaden
+
+Nachdem wir die Website über uns informiert haben und wir wissen, dass wir die cyberLAGO-Seite auch scrapen dürfen, können wir damit jetzt endlich loslegen: Wir laden uns die html-Seite (als Liste von <head> und <body>) in R!
+
+```{r}
+session %>% 
+  polite::nod(str_c('events')) %>%
+  polite::scrape() -> events_html
+```
+
+Da sich - besonders bei Events-Seiten - sich Inhalt und html-Struktur zeitnah verändern können, ist es best practice, die html-Dateien zu downloaden und zu speichern. So läuft unser Code auch noch, wenn die Seite sich online schon wieder verändert hat. 
+
+```{r}
+# create directory to store the htmls
+if (!dir.exists(here::here('assets', 'htmls'))) {
+  dir.create(here::here('assets', 'htmls'))
+}
+
+# function to download htmls
+download_html <- function(url, filename) {
+  polite::nod(session, url) %>%
+    polite::rip(destfile = filename,
+                path = here::here('assets', 'htmls'),
+                overwrite = TRUE)
+  }
+
+# call function to download html 
+download_html(str_c(base_url, 'events'), 'events.html')
+```
+
+Hinweis: So wahnsinnig viel Sinn ergibt es hier nicht, eine Funktion für den Download zu schreiben. Die bekommt erst dadurch so richtig Power, wenn wir sie auf eine Liste an URLs anwenden mit `purrr::map()`!
+
+
+## XPath: Daten extrahieren
+
+Jetzt haben wir zwar die html, so irre viel können wir bisher aber leider auch noch nicht damit anfangen... Wir brauchen nur die für uns relevanten Daten, hier die Tabelle. Um an die Tabelle zu kommen, können wir mit **XPath** arbeiten! Da XPath zwar sehr nützlich, aber genauso nervig sein kann, gibt es Hilfmittel, damit wir die Pfade nicht selbst basteln müssen: 
+
+- Rechtsklick > Untersuchen/Inspect > HTML Node suchen
+- [Selector Gadget](https://selectorgadget.com/): "SelectorGadget is an open source tool that makes CSS selector generation and discovery on complicated sites a breeze"
+
+Hier die XPaths zu den Tabellen, die uns hier interessieren:
+- *Titel*: /html/body/div[1]/div[2]/div[1]/div[2]/div/div/div/div/div/div[3]/div/div[2]/div[3]/div[2]/ul/li[4]/div/div[2]/h3/a
+- *Datum*: /html/body/div[1]/div[2]/div[1]/div[2]/div/div/div/div/div/div[3]/div/div[2]/div[3]/div[2]/ul/li[4]/div/div[2]/div[1]/div/div[1]/span[1]
+- *Location*: /html/body/div[1]/div[2]/div[1]/div[2]/div/div/div/div/div/div[3]/div/div[2]/div[3]/div[2]/ul/li[4]/div/div[2]/div[1]/div/div[2]
+
+Wir wollen mal den Titel der heutigen Veranstaltung extrahieren:
+```{r}
+events_html %>%
+  rvest::html_element(xpath = '//ul/li[1]/div/div[2]/h3/a') %>% 
+  rvest::html_text()
+```
+
+Das geht auch für eine der anderen Veranstaltungen! Wo ist der Unterschied im XPath?
+```{r}
+events_html %>%
+  rvest::html_element(xpath = '//ul/li[2]/div/div[2]/h3/a') %>% 
+  rvest::html_text()
+```
+
+```{r}
+events_html %>%
+  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% 
+  rvest::html_text() -> event_titles
+```
+
+Das geht jetzt natürlich nicht nur für die Titel, wir wollen auch noch Datum, Uhrzeit und Ort, sowie den hinterlegten Event-Link für jede der angezeigten Veranstaltungen:
+```{r}
+# Titel
+events_html %>%
+  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% 
+  rvest::html_text()
+
+# Datum & Zeit Beginn
+events_html %>%
+  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% 
+  rvest::html_text()
+
+# Zeit Ende
+events_html %>%
+  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[2]') %>% 
+  rvest::html_text()
+
+# Location
+events_html %>%
+  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% 
+  rvest::html_text()
+
+#URL
+events_html %>% 
+  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% 
+  rvest::html_attr('href')
+```
+
+
+## Datenbereinigung
+
+Inzwischen haben wir zwar die Teile der html-Seite, die uns interessieren - aber noch nicht in einer brauchbaren Form für weitere Analysen. Daher once again: Datenbereinigung!
+Wir ziehen uns alle extrahierten Daten zusammen in einen Datensatz und erledigen dabei direkt die hier überschaubare Bereinigung:
+
+```{r}
+data.frame(
+  event = events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_text2(),
+  date = sub(' ,.*', '', events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
+  start = sub('.*, ', '', events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
+  end = events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[2]') %>% rvest::html_text2(),
+  location = gsub('^\\|', '', events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% rvest::html_text2()),
+  url = events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_attr('href')
+) -> df
+```
+
+Und schon haben wir die Daten! Eigentlich gar nicht so viel Code, oder?
+
+## Datensatz speichern
+Und schön ist der Datensatz inzwischen und soll daher auch gespeichert werden - wir wollen das Skript fürs Scrapen ja nicht vor jeder Analyse durchlaufen lassen müssen, sondern können dann direkt einfach den Datensatz laden und haben dann auch keine Probleme, falls sich die Website verändert und unser wunderbares Scraping-Skript nicht mehr durchlaufen will...
+
+```{r}
+saveRDS(df, file = here::here('data', 'events.RDS'))
+```
+
+# Hands-On
+Jetzt seid ihr an der Reihe! Natürlich gibt es nicht nur die cyberLAGO-Website, was wäre noch interessant? Wikipedia zum Beispiel: zu unendlich vielen Themen gibt es Seiten mit noch zahlreicheren Tabellen, wie toll wäre es, wenn man diese direkt in R ziehen könnte? Und genau das sollt ihr jetzt einmal tun! Folgt einfach den Hinweisen für euer erstes eigenes Scraping-Projekt!
+
+1) Zuerst braucht ihr die URL, mit der ihr arbeiten wollt, wir haben da mal etwas rausgesucht: https://en.wikipedia.org/wiki/2020_United_States_Senate_elections
+```{r}
+
+
+```
+
+2) Denkt dran: immer direkt mitteilen, wer ihr seid und was ihr macht. Dürft ihr die Seite scrapen? Was ist der Crawl Delay?
+```{r}
+
+
+```
+
+3) Ladet die html-Seite nun in R und auch direkt lokal herunter, damit ihr später auch noch damit arbeiten könnt (Wikipedia ändert sich schnell mal...):
+```{r}
+
+
+
+```
+
+```{r}
+# create directory to store the htmls
+
+
+
+
+# function to download htmls
+
+
+
+
+
+
+
+# call function to download html 
+
+```
+
+4) Last but not least dann das was wir eigentlich wollen: 
+- Tabelle: *Special elections during the preceding Congress*
+- Tabelle: *Elections leading to the next Congress*
+Sucht euch den entsprechenden XPath der beiden Tabellen und experimentiert mal mit `rvest::html_table()`:
+
+```{r}
+
+
+
+```
+
+```{r}
+
+
+
+```
+
+5) Da das jetzt noch nicht ganz so 'tidy' ist der Datensatz, müssen wir -seufz- mal wieder ran an die Datenbearbeitung, das haben wir aber hier für euch übernommen (wenn ihr dazu mehr lernen wollt, kommt zu unserem Workshop zur Datenbereinigung an die Uni :)):
+```{r}
+# wir wählen unseren Datensatz aus
+congress_elections %>% 
+  # bereinigen die Variablennamen
+  janitor::clean_names() %>% 
+  # entfernen der ersten Reihe 
+  filter(incumbent != "Senator") %>% 
+  # entfernen von störenden Wiki-Artefakten
+  mutate(across(everything(),~ str_remove_all(.x,  pattern = "\\[[\\s\\S]*\\]"))) %>% 
+  # und teilen die Gewünschte Variable 
+  tidyr::separate(col = candidates, sep = "[()]", into = c("name","party", "pct")) %>% 
+  # nun bereinigen wir die drei Variablen noch
+  dplyr::mutate(name = stringr::str_sub(name, 3)) %>% 
+  # löschen aller Zeichen nach %
+  dplyr::mutate(pct = str_extract(string = pct, pattern = ".*%")) -> election_results
+  #Voilà wir haben einen sauberen Datensatz!
+
+# Abspeichern nicht vergessen!
+saveRDS(election_results, file = here::here('data', 'election_results.RDS'))
+```
+
+# Scraping at Scale
+So jetzt haben wir die Daten der aktuellen Events, dann lasst uns doch einmal träumen... Was wäre wenn wir das automatisiert für zurückliegende Events machen könnten?! Here we go:
+
+Wir schauen uns erstmal einige URLs der Websites mit den vergangenen Events an:
+- https://cyberlago.net/events/liste/?tribe_event_display=past&tribe_paged=1
+- https://cyberlago.net/events/liste/?tribe_event_display=past&tribe_paged=2
+... und das geht 33 Seiten in genau dieser Struktur!
+
+```{r}
+# Base URL definieren
+base_url <- 'https://cyberlago.net/'
+
+# Be polite
+session <- polite::bow(url = base_url, 
+                       user_agent = 'Workshop Web Data Collection - zoe.w@correlaid.org')
+
+# Vektor mit allen Seiten, die wir uns anschauen wollen
+pages <- 1:33
+
+# Scrapen und Downloaden aller HTML Dateien von diesen Seiten
+# Mit purrr können wir über den Vektor mit den Seiten-Zahlen gehen...
+purrr::map(.x = pages, ~ {
+  #...die URL für jedes Jahr zusammenbasteln und uns jeweils auf der Seite anmelden...
+  polite::nod(session, str_c('events//liste/?tribe_event_display=past&tribe_paged=', .x)) %>% 
+  #... und die HTML scrapen!
+    polite::scrape() 
+}) -> results   
+
+# Alternativ zum lokalen Abspeichern der Dateien:
+purrr::map(.x = pages, ~ {
+  #...die URL für jedes Jahr zusammenbasteln und uns jeweils auf der Seite anmelden...
+  polite::nod(session, str_c('events//liste/?tribe_event_display=past&tribe_paged=', .x)) %>% 
+  #...und abspeichern!
+    polite::rip(destfile = str_c('events_', .x, '.html'),
+                path = here::here('assets', 'htmls'),
+                overwrite = TRUE)
+})
+```
+
+Aus den htmls der einzelnen Eventsseiten kann dann ein Datensatz erstellt werden:
+
+```{r}
+# 1) Entweder mit der purrr-Funktion aus dem Tidyverse
+purrr::map_dfr(.x = results, ~ {
+  data.frame(
+    event = .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_text2(),
+    date = sub(' ,.*', '', .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
+    start = sub('.*, ', '', .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
+    end = .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[2]') %>% rvest::html_text2(),
+    location = gsub('^\\|', '', .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% rvest::html_text2()),
+    url = .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_attr('href')
+  ) 
+}) -> all_events
+
+# 2) Oder alternativ mit einem For Loop
+all_events <- setNames(data.frame(matrix(ncol = 6, nrow = 0)), c('event', 'date', 'start', 'end', 'location', 'url'))
+
+for (i in 1:length(results)) {
+  print(i)
+  data.frame(
+    event = results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_text2(),
+    date = sub(' ,.*', '', results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
+    start = sub('.*, ', '', results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
+    end = results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[2]') %>% rvest::html_text2(),
+    location = gsub('^\\|', '', results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% rvest::html_text2()),
+    url = results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_attr('href')
+  ) -> tmp
+  all_events <- rbind(test, tmp)
+} 
+```
+
+Der Datensatz ist zwar schon erstaunlich clean, ein bisschen Aufwand müssten wir jetzt aber eigentlich noch in die Bereinigung stecken - sparen wir uns jetzt für den Moment. Trotzdem wichtig: speichern des Datensatzes!
+
+```{r}
+saveRDS(all_events, file = here::here('data', 'all_events.RDS'))
+```
+
+# Hands-On
+Erinnert ihr euch an die Wikipedia-Tabellen aus dem letzten Hands-On Teil? Das waren die Daten aus dem Jahr 2020, aber: Was wäre, wenn wir das automatisiert für sehr viele Jahre machen könnten?! Here we go:
+
+1) Definiert erst einmal eure Base-URL:
+```{r}
+
+```
+
+2) Eine höfliche Vorstellung muss sein:
+```{r}
+
+
+```
+
+3) Erstellt den Vektor `year` mit all den Jahren, die ihr euch anschauen wollt, also 2014-20 (Achtung: die Wahlen sind nur alle zwei Jahre):
+```{r}
+
+```
+
+4) Und nun der spannende Teil - Laden der html-Seiten in R:
+```{r}
+
+
+
+
+
+
+
+```
+
+5) Wenn das geklappt hat, top! Wenn du dir die XPaths zu den Tabellen nun für die einzelnen Jahre anschaust, wirst du feststellen, dass sich der XPath leider von Jahr zu Jahr leicht verändert. Daher haben wir den nächsten Codeblock schon geschrieben, aber versucht gerne nachzuvollziehen, was hier passiert!
+
+Hier hilft uns die power von `map`! Genauer gesagt, die Power von `map2()`. Unser Problem ist ja folgendes. Wir haben jeweils eine HTML von der wir per XPath eine Tabelle extrahieren möchten. Leider ändert sich der XPath aber von Wahl zu Wahl (bzw. HTML zu HTML). Die Crux ist es jetzt, R mitzuteilen, für welches HTML wir welchen XPath anwenden möchten. Tada: `map2()` betritt die Bühne! Im Prinzip funktioniert `map2()` wie `map`. Es erlaubt uns nur eine weitere Liste anzugeben, über die wir iterieren können. In diesem Fall eben die einzelnen XPaths:
+
+```{r}
+# Grundlegenden XPath und variierenden Endung definieren
+base_xpath <- "/html/body/div[3]/div[3]/div[5]/div[1]/table"
+table_location <- c(9, 10, 9, 9)
+
+# Laden der html-Seiten mit Hilfe von map2
+purrr::map2(.x = table_location, .y = results,  ~ {
+  rvest::html_element(x = .y, xpath = str_c("/html/body/div[3]/div[3]/div[5]/div[1]/table", "[", .x, "]"))
+}) -> html_election_tables
+
+# Nun können wir wieder die html-Tabellen formatieren lassen:
+# Dazu bauen bauen wir uns zuerst eine leere Liste, in welcher wir die bearbeiteten
+# Datensätze später ablegen. Nun iterieren wir über unsere html-Tabellen und wandeln
+# sie in R-Tabellen um. Danach speichern wir sie der Reihe nach in unserer Liste ab.
+election_result_list <- vector("list", length = 4)
+
+for (i in seq_along(html_election_tables)) {
+  html_table(html_election_tables[[i]]) -> election_result_list[[i]]
+}
+
+# Für die Datenbereinigung der Tabellen können wir einfach wieder eine Funktion 
+# basteln und diese dann auf alle Tabellen anwenden:
+clean_election_tables <- function(list_element){
+  list_element %>% 
+  # bereinigen die Variablennamen
+  janitor::clean_names() %>% 
+  # entfernen der ersten Reihe 
+  filter(incumbent != "Senator") %>% 
+  # entfernen von störenden Wiki-Artefakten
+  mutate(across(everything(),~ str_remove_all(.x,  pattern = "\\[[\\s\\S]*\\]"))) %>% 
+  # und teilen die Gewünschte Variable 
+  tidyr::separate(col = candidates, sep = "[()]", into = c("name","party", "pct")) %>% 
+  # nun bereinigen wir die drei Variablen noch
+  dplyr::mutate(name = stringr::str_sub(name, 3)) %>% 
+  # löschen aller Zeichen nach %
+  dplyr::mutate(pct = str_extract(string = pct, pattern = ".*%")) -> result
+}
+
+map(election_result_list, ~ clean_election_tables(.x)) -> tidy_election_results
+```

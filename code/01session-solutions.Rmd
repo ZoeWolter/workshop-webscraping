@@ -180,7 +180,86 @@ saveRDS(df, file = here::here('data', 'events.RDS'))
 ```
 
 # Hands-On
-tba
+Jetzt seid ihr an der Reihe! Natürlich gibt es nicht nur die cyberLAGO-Website, was wäre noch interessant? Wikipedia zum Beispiel: zu unendlich vielen Themen gibt es Seiten mit noch zahlreicheren Tabellen, wie toll wäre es, wenn man diese direkt in R ziehen könnte? Und genau das sollt ihr jetzt einmal tun! Folgt einfach den Hinweisen für euer erstes eigenes Scraping-Projekt!
+
+1) Zuerst braucht ihr die URL, mit der ihr arbeiten wollt, wir haben da mal etwas rausgesucht: https://en.wikipedia.org/wiki/2020_United_States_Senate_elections
+```{r}
+base_url <- 'https://en.wikipedia.org/'
+wiki_url <- 'https://en.wikipedia.org/wiki/2020_United_States_Senate_elections'
+```
+
+2) Denkt dran: immer direkt mitteilen, wer ihr seid und was ihr macht. Dürft ihr die Seite scrapen? Was ist der Crawl Delay?
+```{r}
+polite::bow(url = str_c(base_url), 
+            user_agent = 'Workshop Web Data Collection - zoe.w@correlaid.org') -> session
+```
+
+3) Ladet die html-Seite nun in R und auch direkt lokal herunter, damit ihr später auch noch damit arbeiten könnt (Wikipedia ändert sich schnell mal...):
+```{r}
+session %>% 
+  polite::nod(str_c('wiki/2020_United_States_Senate_elections')) %>%
+  polite::scrape() -> wiki_html
+```
+
+```{r}
+# create directory to store the htmls
+if (!dir.exists(here::here('assets', 'htmls'))) {
+  dir.create(here::here('assets', 'htmls'))
+}
+
+# function to download htmls
+download_html <- function(url, filename) {
+  polite::nod(session, url) %>%
+    polite::rip(destfile = filename,
+               path = here::here('assets', 'htmls'),
+               overwrite = TRUE)
+  }
+
+# call function to download html 
+download_html(str_c(base_url, 'wiki/2020_United_States_Senate_elections'), 'election.html')
+```
+
+4) Last but not least dann das was wir eigentlich wollen: 
+- Tabelle: *Special elections during the preceding Congress*
+- Tabelle: *Elections leading to the next Congress*
+Sucht euch den entsprechenden XPath der beiden Tabellen und experimentiert mal mit `rvest::html_table()`:
+
+- *Special elections during the preceding Congress*: /html/body/div[3]/div[3]/div[5]/div[1]/table[8]
+- *Elections leading to the next Congress*: /html/body/div[3]/div[3]/div[5]/div[1]/table[9]
+
+```{r}
+wiki_html %>%
+  rvest::html_element(xpath = '//table[8]') %>% 
+  rvest::html_table() -> special_elections
+```
+
+```{r}
+wiki_html %>%
+  rvest::html_element(xpath = '//table[9]') %>% 
+  rvest::html_table() -> congress_elections
+```
+
+5) Da das jetzt noch nicht ganz so 'tidy' ist der Datensatz, müssen wir -seufz- mal wieder ran an die Datenbearbeitung, das haben wir aber hier für euch übernommen (wenn ihr dazu mehr lernen wollt, kommt zu unserem Workshop zur Datenbereinigung an die Uni :)):
+```{r}
+# wir wählen unseren Datensatz aus
+congress_elections %>% 
+  # bereinigen die Variablennamen
+  janitor::clean_names() %>% 
+  # entfernen der ersten Reihe 
+  filter(incumbent != "Senator") %>% 
+  # entfernen von störenden Wiki-Artefakten
+  mutate(across(everything(),~ str_remove_all(.x,  pattern = "\\[[\\s\\S]*\\]"))) %>% 
+  # und teilen die Gewünschte Variable 
+  tidyr::separate(col = candidates, sep = "[()]", into = c("name","party", "pct")) %>% 
+  # nun bereinigen wir die drei Variablen noch
+  dplyr::mutate(name = stringr::str_sub(name, 3)) %>% 
+  # löschen aller Zeichen nach %
+  dplyr::mutate(pct = str_extract(string = pct, pattern = ".*%")) -> election_results
+  #Voilà wir haben einen sauberen Datensatz!
+
+# Abspeichern nicht vergessen!
+saveRDS(election_results, file = here::here('data', 'election_results.RDS'))
+```
 
 # Scraping at Scale
 So jetzt haben wir die Daten der aktuellen Events, dann lasst uns doch einmal träumen... Was wäre wenn wir das automatisiert für zurückliegende Events machen könnten?! Here we go:
@@ -199,7 +278,7 @@ session <- polite::bow(url = base_url,
                        user_agent = 'Workshop Web Data Collection - zoe.w@correlaid.org')
 
 # Vektor mit allen Seiten, die wir uns anschauen wollen
-pages <- 1:33
+pages <- 1:25
 
 # Scrapen und Downloaden aller HTML Dateien von diesen Seiten
 # Mit purrr können wir über den Vektor mit den Seiten-Zahlen gehen...
@@ -257,4 +336,80 @@ Der Datensatz ist zwar schon erstaunlich clean, ein bisschen Aufwand müssten wi
 
 ```{r}
 saveRDS(all_events, file = here::here('data', 'all_events.RDS'))
+```
+
+# Hands-On
+Erinnert ihr euch an die Wikipedia-Tabellen aus dem letzten Hands-On Teil? Das waren die Daten aus dem Jahr 2020, aber: Was wäre, wenn wir das automatisiert für sehr viele Jahre machen könnten?! Here we go:
+
+1) Definiert erst einmal eure Base-URL:
+```{r}
+base_url <- 'https://en.wikipedia.org/'
+```
+
+2) Eine höfliche Vorstellung muss sein:
+```{r}
+session <- polite::bow(url = base_url, 
+                       user_agent = 'Workshop Web Data Collection - zoe.w@correlaid.org')
+```
+
+3) Erstellt den Vektor `year` mit all den Jahren, die ihr euch anschauen wollt, also 2014-20 (Achtung: die Wahlen sind nur alle zwei Jahre):
+```{r}
+years <- seq(2014, 2020, by = 2)
+```
+
+4) Und nun der spannende Teil - Laden der html-Seiten in R:
+```{r}
+# Mit purrr können wir über den Vektor mit den Jahren gehen...
+purrr::map(.x = years, ~ {
+  #...die URL für jedes Jahr zusammenbasteln und uns jeweils auf der Seite anmelden...
+  polite::nod(session, str_c('wiki/', .x, '_United_States_Senate_elections')) %>% 
+    #...die HTML scrapen...
+    polite::scrape()
+  #...und abspeichern!
+}) -> results
+```
+
+5) Wenn das geklappt hat, top! Wenn du dir die XPaths zu den Tabellen nun für die einzelnen Jahre anschaust, wirst du feststellen, dass sich der XPath leider von Jahr zu Jahr leicht verändert. Daher haben wir den nächsten Codeblock schon geschrieben, aber versucht gerne nachzuvollziehen, was hier passiert!
+
+Hier hilft uns die power von `map`! Genauer gesagt, die Power von `map2()`. Unser Problem ist ja folgendes. Wir haben jeweils eine HTML von der wir per XPath eine Tabelle extrahieren möchten. Leider ändert sich der XPath aber von Wahl zu Wahl (bzw. HTML zu HTML). Die Crux ist es jetzt, R mitzuteilen, für welches HTML wir welchen XPath anwenden möchten. Tada: `map2()` betritt die Bühne! Im Prinzip funktioniert `map2()` wie `map`. Es erlaubt uns nur eine weitere Liste anzugeben, über die wir iterieren können. In diesem Fall eben die einzelnen XPaths:
+
+```{r}
+# Grundlegenden XPath und variierenden Endung definieren
+base_xpath <- "/html/body/div[3]/div[3]/div[5]/div[1]/table"
+table_location <- c(9, 10, 9, 9)
+
+# Laden der html-Seiten mit Hilfe von map2
+purrr::map2(.x = table_location, .y = results,  ~ {
+  rvest::html_element(x = .y, xpath = str_c("/html/body/div[3]/div[3]/div[5]/div[1]/table", "[", .x, "]"))
+}) -> html_election_tables
+
+# Nun können wir wieder die html-Tabellen formatieren lassen:
+# Dazu bauen bauen wir uns zuerst eine leere Liste, in welcher wir die bearbeiteten
+# Datensätze später ablegen. Nun iterieren wir über unsere html-Tabellen und wandeln
+# sie in R-Tabellen um. Danach speichern wir sie der Reihe nach in unserer Liste ab.
+election_result_list <- vector("list", length = 4)
+
+for (i in seq_along(html_election_tables)) {
+  html_table(html_election_tables[[i]]) -> election_result_list[[i]]
+}
+
+# Für die Datenbereinigung der Tabellen können wir einfach wieder eine Funktion 
+# basteln und diese dann auf alle Tabellen anwenden:
+clean_election_tables <- function(list_element){
+  list_element %>% 
+  # bereinigen die Variablennamen
+  janitor::clean_names() %>% 
+  # entfernen der ersten Reihe 
+  filter(incumbent != "Senator") %>% 
+  # entfernen von störenden Wiki-Artefakten
+  mutate(across(everything(),~ str_remove_all(.x,  pattern = "\\[[\\s\\S]*\\]"))) %>% 
+  # und teilen die Gewünschte Variable 
+  tidyr::separate(col = candidates, sep = "[()]", into = c("name","party", "pct")) %>% 
+  # nun bereinigen wir die drei Variablen noch
+  dplyr::mutate(name = stringr::str_sub(name, 3)) %>% 
+  # löschen aller Zeichen nach %
+  dplyr::mutate(pct = str_extract(string = pct, pattern = ".*%")) -> result
+}
+
+map(election_result_list, ~ clean_election_tables(.x)) -> tidy_election_results
 ```
