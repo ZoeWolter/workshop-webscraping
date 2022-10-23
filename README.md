@@ -14,6 +14,8 @@ Herzlich Willkommen zu unserem Workshop zu **Webscraping mit R**!
 **Tag 1 | 21.10.2022 - Zoé Wolter**
 - Aufbau von HTMLs verstehen
 - Extraktion von Informationen anhand ihrer XPaths
+- "Webetikette" & das robots.txt
+- Scraping des cyberLAGO-Veranstaltungskalenders
 - Anwenden auf US Wahldaten von Wikipedia
 
 **Tag 2 | 28.10.2022 - Philipp Bosch**
