@@ -100,55 +100,59 @@ Jetzt haben wir zwar die html, so irre viel können wir bisher aber leider auch 
 - [Selector Gadget](https://selectorgadget.com/): "SelectorGadget is an open source tool that makes CSS selector generation and discovery on complicated sites a breeze"
 
 Hier die XPaths zu den Tabellen, die uns hier interessieren:
-- *Titel*: /html/body/div[1]/div[2]/div[1]/div[2]/div/div/div/div/div/div[3]/div/div[2]/div[3]/div[2]/ul/li[4]/div/div[2]/h3/a
+- *Titel*: /html/body/div[1]/div[2]/div[1]/div[2]/div/div/div/div/div/div[3]/div/div/div/div[3]/div[1]/div[2]/article/div[2]/header/h3/a
 - *Datum*: /html/body/div[1]/div[2]/div[1]/div[2]/div/div/div/div/div/div[3]/div/div[2]/div[3]/div[2]/ul/li[4]/div/div[2]/div[1]/div/div[1]/span[1]
 - *Location*: /html/body/div[1]/div[2]/div[1]/div[2]/div/div/div/div/div/div[3]/div/div[2]/div[3]/div[2]/ul/li[4]/div/div[2]/div[1]/div/div[2]
 
 Wir wollen mal den Titel der heutigen Veranstaltung extrahieren:
+
 ```{r}
 events_html %>%
-  rvest::html_element(xpath = '//ul/li[1]/div/div[2]/h3/a') %>% 
+  rvest::html_element(xpath = '//div[3]/div[1]/div[2]/article/div[2]/header/h3/a') %>% 
   rvest::html_text()
 ```
 
 Das geht auch für eine der anderen Veranstaltungen! Wo ist der Unterschied im XPath?
+
 ```{r}
 events_html %>%
-  rvest::html_element(xpath = '//ul/li[2]/div/div[2]/h3/a') %>% 
+  rvest::html_element(xpath = '//div[3]/div[2]/div[2]/article/div[2]/header/h3/a') %>% 
+  rvest::html_text()
+
+events_html %>%
+  rvest::html_element(xpath = '//div[3]/div[3]/div[2]/article/div[2]/header/h3/a') %>% 
   rvest::html_text()
 ```
 
+Es ändert sich die Zahl des zweiten `div` im XPath, d.h. wir können diese durch ein `*` ersetzen und erhalten alle Eventtitel auf der Seite:
+
 ```{r}
 events_html %>%
-  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% 
+  rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/h3/a') %>% 
   rvest::html_text() -> event_titles
 ```
 
-Das geht jetzt natürlich nicht nur für die Titel, wir wollen auch noch Datum, Uhrzeit und Ort, sowie den hinterlegten Event-Link für jede der angezeigten Veranstaltungen:
+Das geht jetzt natürlich nicht nur für die Titel, wir wollen auch noch Datum und Uhrzeit, sowie den hinterlegten Event-Link für jede der angezeigten Veranstaltungen:
+
 ```{r}
 # Titel
 events_html %>%
-  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% 
+  rvest::html_nodes(xpath = '//div[3]/div[2]/div[2]/article/div[2]/header/h3/a') %>% 
   rvest::html_text()
 
 # Datum & Zeit Beginn
 events_html %>%
-  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% 
+  rvest::html_nodes(xpath = '//div[3]/div[2]/div[2]/article/div[2]/header/div/time/span[1]') %>% 
   rvest::html_text()
 
 # Zeit Ende
 events_html %>%
-  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[2]') %>% 
-  rvest::html_text()
-
-# Location
-events_html %>%
-  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% 
+  rvest::html_nodes(xpath = '//div[3]/div[2]/div[2]/article/div[2]/header/div/time/span[2]') %>% 
   rvest::html_text()
 
 #URL
 events_html %>% 
-  rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% 
+  rvest::html_nodes(xpath = '//div[3]/div[1]/div[2]/article/div[2]/header/h3/a') %>% 
   rvest::html_attr('href')
 ```
 
@@ -160,12 +164,11 @@ Wir ziehen uns alle extrahierten Daten zusammen in einen Datensatz und erledigen
 
 ```{r}
 data.frame(
-  event = events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_text2(),
-  date = sub(' ,.*', '', events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
-  start = sub('.*, ', '', events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
-  end = events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[2]') %>% rvest::html_text2(),
-  location = gsub('^\\|', '', events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% rvest::html_text2()),
-  url = events_html %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_attr('href')
+  event = events_html %>% rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/h3/a') %>% rvest::html_text2(),
+  date = sub(' ,.*', '', events_html %>% rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/div/time/span[1]') %>% rvest::html_text2()),
+  start = sub('.*, ', '', events_html %>% rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/div/time/span[1]') %>% rvest::html_text2()),
+  end = events_html %>% rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/div/time/span[2]') %>% rvest::html_text2(),
+  url = events_html %>% rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/h3/a') %>% rvest::html_attr('href')
 ) -> df
 ```
 
@@ -274,26 +277,36 @@ session <- polite::bow(url = base_url,
                        user_agent = 'Workshop Web Data Collection - zoe.w@correlaid.org')
 
 # Vektor mit allen Seiten, die wir uns anschauen wollen
-pages <- 1:33
+pages <- 1:25
 
 # Scrapen und Downloaden aller HTML Dateien von diesen Seiten
 # Mit purrr können wir über den Vektor mit den Seiten-Zahlen gehen...
 purrr::map(.x = pages, ~ {
   #...die URL für jedes Jahr zusammenbasteln und uns jeweils auf der Seite anmelden...
-  polite::nod(session, str_c('events//liste/?tribe_event_display=past&tribe_paged=', .x)) %>% 
+  polite::nod(session, str_c('?post_type=tribe_events&eventDisplay=list&paged=', .x)) %>% 
   #... und die HTML scrapen!
     polite::scrape() 
 }) -> results   
 
-# Alternativ zum lokalen Abspeichern der Dateien:
+# Alternativ zum lokalen Abspeichern der Dateien: events//liste/?tribe_event_display=past&tribe_paged='
 purrr::map(.x = pages, ~ {
   #...die URL für jedes Jahr zusammenbasteln und uns jeweils auf der Seite anmelden...
-  polite::nod(session, str_c('events//liste/?tribe_event_display=past&tribe_paged=', .x)) %>% 
+  polite::nod(session, str_c('?post_type=tribe_events&eventDisplay=list&paged=', .x)) %>% 
   #...und abspeichern!
     polite::rip(destfile = str_c('events_', .x, '.html'),
                 path = here::here('assets', 'htmls'),
-                overwrite = TRUE)
+                overwrite = FALSE) # wenn ihr die Dateien überschreiben wollt, dann zu TRUE ändern!
 })
+```
+
+Da sich die htmls seit dem letzten Scrapen verändert haben können, können wir ganz einfach die htmls, die wir beim letzten Mal gespeichert haben, wieder einlesen und mit dem Stand weiterarbeiten:
+
+```{r}
+pages <- 1:25
+results <- list()
+purrr::map(.x = pages, ~ {
+  rvest::read_html(here::here(str_c('assets/htmls/events_', .x, '.html')))
+}) -> results
 ```
 
 Aus den htmls der einzelnen Eventsseiten kann dann ein Datensatz erstellt werden:
@@ -306,25 +319,23 @@ purrr::map_dfr(.x = results, ~ {
     date = sub(' ,.*', '', .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
     start = sub('.*, ', '', .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
     end = .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[2]') %>% rvest::html_text2(),
-    location = gsub('^\\|', '', .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% rvest::html_text2()),
     url = .x %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_attr('href')
   ) 
 }) -> all_events
 
 # 2) Oder alternativ mit einem For Loop
-all_events <- setNames(data.frame(matrix(ncol = 6, nrow = 0)), c('event', 'date', 'start', 'end', 'location', 'url'))
+all_events <- setNames(data.frame(matrix(ncol = 6, nrow = 0)), c('event', 'date', 'start', 'end', 'url'))
 
 for (i in 1:length(results)) {
   print(i)
   data.frame(
     event = results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_text2(),
-    date = sub(' ,.*', '', results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
+    date = sub(' ,.*', '', results[[1]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
     start = sub('.*, ', '', results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[1]') %>% rvest::html_text2()),
     end = results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[1]/span[2]') %>% rvest::html_text2(),
-    location = gsub('^\\|', '', results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/div[1]/div/div[2]') %>% rvest::html_text2()),
     url = results[[i]] %>% rvest::html_nodes(xpath = '//ul/li[*]/div/div[2]/h3/a') %>% rvest::html_attr('href')
   ) -> tmp
-  all_events <- rbind(test, tmp)
+  all_events <- rbind(all_events, tmp)
 } 
 ```
 
