@@ -5,6 +5,8 @@ date: "Dec 09, 2021"
 output: html_document
 ---
 
+### slides with recap and intro to API (server/client principle) --> tweet with post/patch/get
+
 # Grundlegende Struktur
 
 -   Bezug auf letzte Session:
