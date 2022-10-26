@@ -131,7 +131,7 @@ events_html %>%
   rvest::html_text() -> event_titles
 ```
 
-Das geht jetzt natürlich nicht nur für die Titel, wir wollen auch noch Datum und Uhrzeit, sowie den hinterlegten Event-Link für jede der angezeigten Veranstaltungen:
+Das geht jetzt natürlich nicht nur für die Titel, wir wollen auch noch Datum, Ort und Uhrzeit, sowie den hinterlegten Event-Link für jede der angezeigten Veranstaltungen:
 
 ```{r}
 # Titel
@@ -147,6 +147,11 @@ events_html %>%
 # Zeit Ende
 events_html %>%
   rvest::html_nodes(xpath = '//div[3]/div[2]/div[2]/article/div[2]/header/div/time/span[2]') %>% 
+  rvest::html_text()
+
+# Location
+events_html %>%
+  rvest::html_nodes(xpath = '//div[3]/div[1]/div[2]/article/div[2]/header/address/span[1]') %>% 
   rvest::html_text()
 
 #URL
@@ -167,6 +172,7 @@ data.frame(
   date = sub(' ,.*', '', events_html %>% rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/div/time/span[1]') %>% rvest::html_text2()),
   start = sub('.*, ', '', events_html %>% rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/div/time/span[1]') %>% rvest::html_text2()),
   end = events_html %>% rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/div/time/span[2]') %>% rvest::html_text2(),
+  location = events_html %>% rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/address/span[1]') %>% rvest::html_text2(),
   url = events_html %>% rvest::html_nodes(xpath = '//div[3]/div[*]/div[2]/article/div[2]/header/h3/a') %>% rvest::html_attr('href')
 ) -> df
 ```
