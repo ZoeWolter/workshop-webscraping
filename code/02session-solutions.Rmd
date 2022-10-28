@@ -64,7 +64,7 @@ polite::bow(url = str_c(base_url,
 raw_house_members %>% 
   dplyr::select(-party) %>% 
   dplyr::filter(party_2 == "Republican") %>% 
-  dplyr::rename(party = party_2, age = born_3) %>% 
+  dplyr::rename(party = party_2, age = born_2) %>% 
   mutate(across(.cols = everything(), ~ stringr::str_squish(.x))) %>% 
   mutate(across(.cols = everything(), ~ stringr::str_remove_all(.x, pattern = "\\[[0-9]*\\]"))) %>% 
   mutate(birthday = lubridate::ymd(stringr::str_extract(age, "[0-9]{4}-[0-9]{2}-[0-9]{2}")),
@@ -604,57 +604,64 @@ final_df %>%
 
 Findet den/die Kandidat/in mit den höchsten Einnahmen
 ```{r}
-
+final_df %>% 
+  filter(support_oppose_indicator == "S") %>% 
+  group_by(candidate_id, name) %>% 
+  summarise(total_money = sum(total)) %>% 
+  arrange(desc(total_money))
 ```
 
 Findet den PAC mit den höchsten Ausgaben. Einmal für Objector und einmal für non-objector.
 ```{r}
+final_df %>% 
+  filter(objection == 0, support_oppose_indicator == "S") %>% 
+  group_by(committee_name) %>%
+  summarise(total_money = sum(total)) %>% 
+  arrange(desc(total_money))
+
+final_df %>% 
+  filter(objection == 1, support_oppose_indicator == "S") %>% 
+  group_by(committee_name) %>%
+  summarise(total_money = sum(total)) %>% 
+  arrange(desc(total_money))
 
 ```
 
 
 ## Ausblick POST-Anfragen
 
-APIs sind ziemlich mächtig, das dürfte nun allen klar sein. Jedoch haben wir 
-bisher nur GET-Requests benutzt. Ziemlich nützlich sind aber auch Post-requests.
-Zum Beispiel für classification problems.
+APIs sind ziemlich mächtig, das dürfte nun allen klar sein. Jedoch haben
+wir bisher nur GET-Requests benutzt. Manche APIs erlauben es uns auch
+Daten zu senden, also sogenannte POST-Requests durchzuführen. Das
+Prinzip bleibt jedoch gleich wie bei GET-Requests: Wir schicken unsere
+gewünschten Parameter per URL an einen Endpunkt. Zusätzlich übermitteln
+wir im Body unseres Requests nun eben auch Daten.
 
-So könnten wir beispielsweise anhand von Bildern das Alter oder Geschlecht von
-Kandidaten bestimmen lassen. Andere Merkmale sind auch möglich, aber sehr kritisch gesehen
-in der Forschung.
+Hier zum Abschluss ein Beispiel anhand der [Jokes
+API](https://v2.jokeapi.dev/). Auch diese API wird eigentlich eher für GET-Requests
+genutzt. Wir können jedoch auch neue und eigene Jokas per POST submitten. 
+Für unser Beispiel möchten wir jedoch im Test-Modus bleiben. 
 
-Code um Bild-URLs von Wikipedia zu ziehen
+Zum Start wieder die URL definieren
+
 ```{r}
-url_pictures <- "https://en.wikipedia.org/wiki/List_of_current_members_of_the_United_States_House_of_Representatives"
-
-
-session_pictures <- polite::bow(url = url_pictures, user_agent = "Web Data with R - philipp.bosch@uni-konstanz.de")
-
-session_pictures %>% 
-  polite::scrape() -> pictures_html
-
-
-# work with html
-pictures_html %>%
-  rvest::html_elements("#votingmembers") %>% 
-  rvest::html_nodes("img") %>% 
-  rvest::html_attr("src") %>% tibble() -> image_links
-
-
-
-pictures_html %>%
-  rvest::html_elements("#votingmembers") %>% 
-  rvest::html_table() %>% 
-  purrr::pluck(1) %>%
-  dplyr::select(-3) %>% 
-  dplyr::filter(Member != "VACANT") %>%
-  dplyr::select(Party, District, Member) -> aux_info_pictures
-  
-
-bind_cols(aux_info_pictures, image_links) %>% 
-  dplyr::rename("url" = 4) %>% 
-  dplyr::mutate(url = str_c("https:", url),
-         url = str_replace_all(url, "\\d{2}(?=px)", "600")) %>% 
-  dplyr::filter(Party == "Republican") -> pictures_df
+jokes_url <- "https://v2.jokeapi.dev/submit/?dry-run"
 ```
 
+
+Body/Daten definieren
+```{r}
+joke_body <- list(
+  formatVersion = 3,
+  category = "Misc",
+  type = "single",
+  joke = "Would be a massive scam if this would not work!",
+  flags = list(nsfw = "false",
+               religious = "false"),
+  lang = "en")
+```
+
+
+```{r}
+POST(jokes_url, body = joke_body, encode = "json", verbose())
+```
