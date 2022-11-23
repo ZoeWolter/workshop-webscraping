@@ -1,24 +1,16 @@
-![CorrelAid Header](https://github.com/CorrelAid/workshop-webscraping/blob/main/assets/img/header.png?raw=true)
+![CorrelAid Header](https://github.com/ZoeWolter/workshop-webscraping/blob/main/assets/img/header.png?raw=true)
 
-# Inside Data Bodensee - Webscraping mit R
+# Web Scraping with R 
 
-Herzlich Willkommen zu unserem Workshop zu **Webscraping mit R**!
+Welcome to the workshop on **Web Scraping with R**!
 
 ## Download
-- Die Materialien zum Workshop können [hier](https://github.com/CorrelAid/workshop-webscraping/archive/main.zip) heruntergeladen werden.
-- Danach die Datei entzippen und in dem Ordner speichern, wo das R-Projekt abgelegt werden soll.
-- Öffnen des R-Projekts über die Datei *web-scraping.Rproj*
+- You can download all the material for the workshop [here](https://github.com/ZoeWolter/workshop-webscraping/archive/main.zip) 
+- Please unzip the file and save it in the folder where you want to store your Rproject. 
+- Please open the Rproject via the file *web-scraping.Rproj*
 
 ## Workshop
-
-**Tag 1 | 21.10.2022 - Zoé Wolter**
-- Aufbau von HTMLs verstehen
-- Extraktion von Informationen anhand ihrer XPaths
-- "Webetikette" & das robots.txt
-- Scraping des cyberLAGO-Veranstaltungskalenders
-- Anwenden auf US Wahldaten von Wikipedia
-
-**Tag 2 | 28.10.2022 - Philipp Bosch**
-- Das Prinzip von APIs 
-- Anwenden auf die FEC API
-- Ergebnisse bereinigen
+- Understanding the structure of HTMLs
+- Extracting information based on its XPaths
+- "Web etiquette" & the robots.txt
+- Hands On: Scraping a Website
